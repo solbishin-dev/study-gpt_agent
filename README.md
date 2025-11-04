@@ -305,3 +305,48 @@ AI: 한국에서는 K-pop과 K-드라마의 영향으로 많은 연예인들이 
 ### 4장 문서와 논문을 요약하는 AI 연구원
 
 ### 5장 회의록을 정리하는 AI 서기
+05-1 음성을 텍스트로 변환하기
+
+- STT(Speech-To-Text): 음성을 텍스트로 변환하는 기술
+- TTS(Text-To-Speech): STT와 반대되는 기술, 텍스트를 입력하면 음성으로 변환해서 출력하는 기술
+- 위스퍼 API 활용하기
+    - MP3의 음성을 텍스트로 변환
+
+```jsx
+Transcription(text='안녕하세요. 이 강의는 GPT API로 챗봇 만들기라는 내용을 다루는 강의입니다.
+ GPT API에 대해서 생소하신 분들도 있을 텐데 우리가 잘 알고 있는 
+ 채GPT, 채GPT 기능을 이용해서 우리가 원하는 프로그램을 어떻게 만드는지에 대해서 이야기할 거예요. 
+ 그래서 뭐 이런 강의들이 사실 많이 있습니다. 
+ 그래서 여러 가지들이 있는데 좀 이 강의의 특징이라고 한다면 GPT로 명확한 미션을 달성하는 챗봇 프로그램을
+  만드는 게 사실 쉽지는 않은데 이걸 어떻게 해서 구현을 하는지 그리고 그게 왜 필요한지에 대해서 
+  좀 이야기를 할 거고요. 그 예제로 예제는 여러 가지가 될 수 있는데 여기서 예제로 하는 것은
+   음악 플레이리스트 동영상을 자동으로 대화를 통해서 생성하는 프로그램 만드는 것을 다루려고 합니다. 
+   그래서 프로그램이 실행되는 모습을 한번 보여드릴게요. 우리가 만들 프로그램은 이런 식으로 이제 나타나게
+    되고', logprobs=None, usage=UsageDuration(seconds=58.0, type='duration'))
+```
+
+   챗GPT가 채GPT로 출력됨 
+
+- 위스퍼 API로 한국어음성 파일을 영어로 바로 번역하기
+
+```jsx
+Translation(text="Hello, this is a lecture on how to make a chatbot with GPT 
+API. Some of you may be unfamiliar with GPT API. 
+We're going to talk about how to make the program we want using 
+the chat GPT function that we know well. 
+So there are a lot of lectures like this. 
+There are many things, but if I were to say the characteristics of this lecture,
+ it's not easy to make a chatbot program that achieves a clear mission with GPT.
+ I'm going to talk about how to implement this and why it's necessary. 
+ As an example, there can be many examples. 
+ The example here is to create a program that automatically creates a music
+  playlist video through conversation. So let me show you how the program runs.
+   The program we're going to make is going to look like this.")
+```
+
+05-2 로컬에서 음성을 텍스트로 변환하기
+
+- [허깅페이스](https://huggingface.co/)(Hugging Face): 인공지능 모델을 개발하는 회사, 허깅 페이스 플랫폼 서비스
+- 위스퍼 모델을 내려받아 로컬에서 사용하기
+    - 필요한 패키지 설치 : [whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo), [FFMPEG](https://www.gyan.dev/ffmpeg/builds/), [파이토치](https://pytorch.org/)
+    - window에서 실행 시 제대로 실행 안됨!
