@@ -351,7 +351,58 @@ There are many things, but if I were to say the characteristics of this lecture,
     - 필요한 패키지 설치 : [whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo), [FFMPEG](https://www.gyan.dev/ffmpeg/builds/), [파이토치](https://pytorch.org/)
     - window에서 실행 시 제대로 실행 안됨!
 
+05-3 문장과 화자 구분하기
 
+- 화자 분리 모델로 시간대별 화자 구분하기 
+payannote.audio 이용해서 개발
+
+```
+%pip install pyannote.audio
+%pip install numpy==1.26
+```
+
+```python
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+HUGGING_FACE_TOKEN = os.getenv("HUGGING_FACE_TOKEN")
+```
+
+```python
+# instantiate the pipeline
+from pyannote.audio import Pipeline
+
+pipeline = Pipeline.from_pretrained(
+  "pyannote/speaker-diarization-3.1",
+  use_auth_token=HUGGING_FACE_TOKEN
+)
+```
+
+```python
+import torch
+
+# cuda가 사용 가능한 경우 cuda를 사용하도록 설정
+if torch.cuda.is_available():
+    pipeline.to(torch.device("cuda"))
+    print('cuda is available')
+else:
+    print('cuda is not available')
+```
+
+```python
+# run the pipeline on an audio file
+# diarization = pipeline("audio.wav")
+diarization = pipeline("../audio/싼기타_비싼기타.mp3")
+
+# dump the diarization output to disk using RTTM format
+with open("싼기타_비싼기타.rttm", "w", encoding='utf-8') as rttm:
+    diarization.write_rttm(rttm)
+
+```
+
+05-4 회의록을 정리하는 AI 서기 완성하기
 
 ### 6장 GPT-4o를 이용한 AI 이미지 분석가
 06-1 GPT 비전에게 이미지 설명 요청하기
