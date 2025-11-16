@@ -1282,5 +1282,1320 @@ ipd.Audio(f"../data/audio/1.mp3")
 
 ### 7장 최신 주식 정보를 알려 주는 AI 투자자 
 07-1 펑션 콜링의 기초
+- 펑션 콜링이란?
+LLM이 사용자의 자연어 요청을 이해하고, 이를 수행하기 위해 미리 정의된 외부 함수(API)를 자동으로 호출하는 기술, LLM은 단순한 정보 제공을 넘어 실제 작업을 수행하고 외부 시스템과 연동할 수 있게 된다.
+예를 들어, 사용자가 지금 몇시야? 물어보면 gpt는 도구 목록에서 시간을 확인할 수 있는 도구를 찾아서 그 도구를 사용 해서 답변함.
+도구 목록의 딕셔너리는 GPT모델이 어떤 도구를 사용할 수 있는 지 알려주는 설명서 역할을 하며, GPT  API를 호출할 때 이 도구 목록도 함께 전달됨
+어떤 걸 물어봤을 때 ‘분석중…’ 이렇게 뜨는 거면 펑션 콜링 기능을 사용해 질문에 답변하는 중임.
+    - [실습] 펑션 콜링 적용하기
+    
+    ```python
+    // GPT를 위해 사용할 함수 정의 및 설명 추가
+    from datetime import datetime
+    
+    def get_current_time():
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(now)
+        return now
+    
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_time",
+                "description": "현재 날짜와 시간을 반환합니다.", #매개변수가 없으므로 파라미터 생략
+            }
+        },
+    ]
+    
+    if __name__ == '__main__':
+        get_current_time()  
+        
+        # 2025-11-11 23:08:00
+    ```
+    
+    ```python
+    from gpt_functions import get_current_time, tools 
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY") 
+    
+    client = OpenAI(api_key=api_key)
+    
+    def get_ai_response(messages, tools=None):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델 지정
+            messages=messages,  # 대화 기록을 입력으로 전달
+            tools=tools,  # 사용 가능한 도구 목록 전달
+        )
+        return response  # 생성된 응답 내용 반환
+    
+    messages = [
+        {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+    ]
+    
+    while True:
+        user_input = input("사용자\t: ")  # 사용자 입력 받기
+    
+        if user_input == "exit":  # 사용자가 대화를 종료하려는지 확인
+            break
+        
+        messages.append({"role": "user", "content": user_input})  # 사용자 메시지 대화 기록에 추가
+        
+        ai_response = get_ai_response(messages, tools=tools)
+        ai_message = ai_response.choices[0].message
+        print(ai_message)  # gpt에서 반환되는 값을 파악하기 위해 임시로 추가
+    
+        tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            tool_name = tool_calls[0].function.name # 실행해야한다고 판단한 함수명 받기
+            tool_call_id = tool_calls[0].id         # tool_call 아이디 받기    
+            
+            if tool_name == "get_current_time":  # 만약 tool_name이 "get_current_time"이라면
+                messages.append({
+                    "role": "function",  # role을 "function"으로 설정
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": get_current_time(),  # get_current_time 함수를 실행한 결과를 content로 설정
+                })
+    
+            ai_response = get_ai_response(messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        messages.append(ai_message)  # AI 응답을 대화 기록에 추가하기
+    
+        print("AI\t: " + ai_message.content)  # AI 응답 출력
+    
+    ```
+    
+
+- [실습] 도시별 시간 알려 주기
+
+```
+// 타임존 정보를 이용해 현재 시간을 구할 수 있도록 수정
+from datetime import datetime
+import pytz 
+
+def get_current_time(timezone: str = 'Asia/Seoul'):
+    tz = pytz.timezone(timezone) # 타임존 설정
+    now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+    now_timezone = f'{now} {timezone}'
+    print(now_timezone)
+    return now_timezone
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_time",
+            "description": "해당 타임존의 날짜와 시간을 반환합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    'timezone': {
+                        'type': 'string',
+                        'description': '현재 날짜와 시간을 반환할 타임존을 입력하세요. (예: Asia/Seoul)',
+                    },
+                },
+                "required": ['timezone'],
+            },        
+        }
+    },
+]
+
+if __name__ == '__main__':
+    get_current_time('America/New_York')
+```
+
+```python
+from gpt_functions import get_current_time, tools 
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+import json
+
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")  
+
+client = OpenAI(api_key=api_key)
+
+def get_ai_response(messages, tools=None):
+    response = client.chat.completions.create(
+        model="gpt-4o",  # 응답 생성에 사용할 모델 지정
+        messages=messages,  # 대화 기록을 입력으로 전달
+        tools=tools,  # 사용 가능한 도구 목록 전달
+    )
+    return response  # 생성된 응답 내용 반환
+
+messages = [
+    {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+]
+
+while True:
+    user_input = input("사용자\t: ")  # 사용자 입력 받기
+
+    if user_input == "exit":  # 사용자가 대화를 종료하려는지 확인
+        break
+    
+    messages.append({"role": "user", "content": user_input})  # 사용자 메시지 대화 기록에 추가
+    
+    ai_response = get_ai_response(messages, tools=tools)
+    ai_message = ai_response.choices[0].message
+    print(ai_message)  # gpt에서 반환되는 값을 파악하기 위해 임시로 추가
+
+    tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+    if tool_calls:  # tool_calls가 있는 경우
+        tool_name = tool_calls[0].function.name # 실행해야한다고 판단한 함수명 받기
+        tool_call_id = tool_calls[0].id         # 함수 아이디 받기    
+        arguments = json.loads(tool_calls[0].function.arguments) # 문자열을 딕셔너리로 변환    
+        
+        if tool_name == "get_current_time":  #tool_name이 "get_current_time"이라면
+            messages.append({
+                "role": "function",  # role을 "function"으로 설정
+                "tool_call_id": tool_call_id,
+                "name": tool_name,
+                "content": get_current_time(timezone=arguments['timezone']),  # 타임존 추가
+            })
+
+        ai_response = get_ai_response(messages, tools=tools) # 다시 GPT 응답 받기
+        ai_message = ai_response.choices[0].message
+
+    messages.append(ai_message)  # AI 응답을 대화 기록에 추가하기
+
+    print("AI\t: " + ai_message.content)  # AI 응답 출력
+
+```
+
+    
+
+- [실습] 여러 도시의 시간을 한 번에 대답할 수 있게 하기
+    
+    ```python
+    from gpt_functions import get_current_time, tools 
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY") 
+    
+    client = OpenAI(api_key=api_key) 
+    
+    def get_ai_response(messages, tools=None):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델 지정
+            messages=messages,  # 대화 기록을 입력으로 전달
+            tools=tools,  # 사용 가능한 도구 목록 전달
+        )
+        return response  # 생성된 응답 내용 반환
+    
+    messages = [
+        {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+    ]
+    
+    while True:
+        user_input = input("사용자\t: ")  # 사용자 입력 받기
+    
+        if user_input == "exit":  # 사용자가 대화를 종료하려는지 확인
+            break
+        
+        messages.append({"role": "user", "content": user_input})  # 사용자 메시지 대화 기록에 추가
+        
+        ai_response = get_ai_response(messages, tools=tools)
+        ai_message = ai_response.choices[0].message
+        print(ai_message)  # gpt에서 반환되는 값을 파악하기 위해 임시로 추가
+    
+        tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls: # 함수 결과 계속 추가
+                tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                arguments = json.loads(tool_call.function.arguments) #문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  # 만약 tool_name이 "get_current_time"이라면
+                    messages.append({
+                        "role": "function",  # role을 "function"으로 설정
+                        "tool_call_id": tool_call_id,
+                        "name": tool_name,
+                        "content": get_current_time(timezone=arguments['timezone']),  # 타임존 추가
+                    })
+            messages.append({"role": "system", "content": "이제 주어진 결과를 바탕으로 답변할 차례다."})  # 함수 실행 완료 메시지 추가
+            ai_response = get_ai_response(messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        messages.append(ai_message)  # AI 응답을 대화 기록에 추가하기
+    
+        print("AI\t: " + ai_message.content)  # AI 응답 출력
+    
+    ```
+    
+
+- [실습] 스트림릿에서 펑션 콜링 사용하기
+    
+    ```
+    from gpt_functions import get_current_time, tools 
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    import streamlit as st
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")  
+    
+    client = OpenAI(api_key=api_key)  
+    
+    def get_ai_response(messages, tools=None):
+        response = client.chat.completions.create(
+            model="gpt-4o",  
+            messages=messages,  
+            tools=tools,  
+        )
+        return response 
+    
+    st.title("💬 AI Chatbot")   
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "system", "content": "너는 사용자를 도와주는 상담사야."}
+        ] 
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant" or msg["role"] == "user": # assistant 혹은 user 메시지인 경우만
+            st.chat_message(msg["role"]).write(msg["content"])
+    
+    if user_input := st.chat_input():    # 사용자 입력 받기
+        st.session_state.messages.append({"role": "user", "content": user_input})  # 사용자 메시지를 대화 기록에 추가
+        st.chat_message("user").write(user_input)  # 사용자 메시지를 브라우저에서도 출력
+        
+        ai_response = get_ai_response(st.session_state.messages, tools=tools)
+        ai_message = ai_response.choices[0].message
+        print(ai_message)  # gpt에서 반환되는 값을 파악하기 위해 임시로 추가
+    
+        tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                arguments = json.loads(tool_call.function.arguments) # (1) 문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  # ⑤ 만약 tool_name이 "get_current_time"이라면
+                    st.session_state.messages.append({
+                        "role": "function",  # role을 "function"으로 설정
+                        "tool_call_id": tool_call_id,
+                        "name": tool_name,
+                        "content": get_current_time(timezone=arguments['timezone']),  # 타임존 추가
+                    })
+            st.session_state.messages.append({"role": "system", "content": "이제 주어진 결과를 바탕으로 답변할 차례다."}) 
+            ai_response = get_ai_response(st.session_state.messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": ai_message.content
+        })  # ③ AI 응답을 대화 기록에 추가합니다.
+    
+        print("AI\t: " + ai_message.content)  # AI 응답 출력
+        st.chat_message("assistant").write(ai_message.content)  # 브라우저에 메시지 출력
+    ```
 07-2 GPT와 미국 주식 이야기하기
+yfinance: 야후 파이낸스의 금융 데이터를 쉽게 가져올 수 있게 해주는 오픈 소스, 주가, 재무제표, 거래량 등 다양한 데이터를 데이터 프레임 형태로 가져올 수 있음 
+
+- [실습] yfinance 사용하기
+
+```python
+%pip install yfinance
+
+import yfinance as yf
+
+# Microsoft (MSFT)에 대한 Ticker(금융 상품 식별하는 고유 코드) 객체 생성
+msft = yf.Ticker("MSFT")
+
+# Ticker 객체에 대한 정보 출력 (.py에서 실행할 때는 print(msft.info)로 사용)
+display(msft.info)
+```
+
+```python
+// 실행 결과
+
+{'address1': 'One Microsoft Way',
+ 'city': 'Redmond',
+ 'state': 'WA',
+ 'zip': '98052-6399',
+ 'country': 'United States',
+ 'phone': '425 882 8080',
+ 'website': '
+ [https://www.microsoft.com](https://www.microsoft.com/)
+ ',
+ 'industry': 'Software - Infrastructure',
+ 'industryKey': 'software-infrastructure',
+ 'industryDisp': 'Software - Infrastructure',
+ 'sector': 'Technology',
+ 'sectorKey': 'technology',
+ 'sectorDisp': 'Technology',
+ 'longBusinessSummary': "Microsoft Corporation develops and supports software, services, devices, and solutions worldwide. The company's Productivity and Business Processes segment offers Microsoft 365 Commercial, Enterprise Mobility + Security, Windows Commercial, Power BI, Exchange, SharePoint, Microsoft Teams, Security and Compliance, and Copilot; Microsoft 365 Commercial products, such as Windows Commercial on-premises and Office licensed services; Microsoft 365 Consumer products and cloud services, such as Microsoft 365 Consumer subscriptions, Office licensed on-premises, and other consumer services; LinkedIn; Dynamics products and cloud services, such as Dynamics 365, cloud-based applications, and on-premises ERP and CRM applications. Its Intelligent Cloud segment provides Server products and cloud services, such as Azure and other cloud services, GitHub, Nuance Healthcare, virtual desktop offerings, and other cloud services; Server products, including SQL and Windows Server, Visual Studio and System Center related Client Access Licenses, and other on-premises offerings; Enterprise and partner services, including Enterprise Support and Nuance professional Services, Industry Solutions, Microsoft Partner Network, and Learning Experience. The company's Personal Computing segment provides Windows and Devices, such as Windows OEM licensing and Devices and Surface and PC accessories; Gaming services and solutions, such as Xbox hardware, content, and services, first- and third-party content Xbox Game Pass, subscriptions, and Cloud Gaming, advertising, and other cloud services; search and news advertising services, such as Bing and Copilot, Microsoft News and Edge, and third-party affiliates. It sells its products through OEMs, distributors, and resellers; and online and retail stores. The company was founded in 1975 and is headquartered in Redmond, Washington.",
+ 'fullTimeEmployees': 228000,
+ 'companyOfficers': [{'maxAge': 1,
+   'name': 'Mr. Satya  Nadella',
+   'age': 57,
+   'title': 'Chairman & CEO',
+   'yearBorn': 1967,
+   'fiscalYear': 2025,
+   'totalPay': 12251294,
+   'exercisedValue': 0,
+   'unexercisedValue': 0},
+  {'maxAge': 1,
+ ...
+```
+
+```python
+// 최근 주가 정보 보기
+hist = msft.history(period="2mo") # 2개월간의 주가 데이터를 가져옴
+display(hist) # 데이터 출력
+```
+<img width="1204" height="821" alt="스크린샷 2025-11-16 오후 5 02 07" src="https://github.com/user-attachments/assets/f55dd4f7-b284-45ad-b066-69260b07b695" />
+<img width="1062" height="244" alt="스크린샷 2025-11-16 오후 5 02 14" src="https://github.com/user-attachments/assets/cfb47817-bd10-400c-95fe-de05f2f045de" />
+
+
+```python
+// 주식 종목의 추천 여부 보기
+msft.recommendations # 추천 정보 출력
+```
+
+<img width="520" height="209" alt="스크린샷 2025-11-16 오후 5 04 19" src="https://github.com/user-attachments/assets/81e3f03a-c23c-412e-99b8-dd6bc08460e8" />
+
+
+- [실습] GPT에서 사용할 yfinance 관련 함수 만들기
+    
+    ```python
+    from datetime import datetime
+    import pytz
+    import yfinance as yf
+    
+    def get_current_time(timezone: str = 'Asia/Seoul'):
+        tz = pytz.timezone(timezone) # 타임존 설정
+        now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        now_timezone = f'{now} {timezone}'
+        print(now_timezone)
+        return now_timezone
+    
+    def get_yf_stock_info(ticker: str):
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        print(info)
+        return str(info)
+    
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_time",
+                "description": "해당 타임존의 날짜와 시간을 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'timezone': {
+                            'type': 'string',
+                            'description': '현재 날짜와 시간을 반환할 타임존을 입력하세요. (예: Asia/Seoul)',
+                        },
+                    },
+                    "required": ['timezone'],
+                },        
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_yf_stock_info",
+                "description": "해당 종목의 Yahoo Finance 정보를 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'ticker': {
+                            'type': 'string',
+                            'description': 'Yahoo Finance 정보를 반환할 종목의 티커를 입력하세요. (예: AAPL)',
+                        },
+                    },
+                    "required": ['ticker'],
+                },        
+            }
+        }
+    ]
+    
+    if __name__ == '__main__':
+        # get_current_time('America/New_York')
+        info = get_yf_stock_info('GOOGL')    
+    ```
+    
+    ```python
+    // 구글 정보 출력 
+    {'address1': '1600 Amphitheatre Parkway', 'city': 'Mountain View', 'state': 'CA', 'zip': '94043', 'country': 'United States', 'phone': '650-253-0000', 'website': 'https://abc.xyz', 'industry': 'Internet Content & Information', 'industryKey': 'internet-content-information', 'industryDisp': 'Internet Content & Information', 'sector': 'Communication Services', 'sectorKey': 'communication-services', 'sectorDisp': 'Communication Services', 'longBusinessSummary': 'Alphabet Inc. offers various products and platforms in the United States, Europe, the Middle East, Africa, the Asia-Pacific, Canada, and Latin America. It operates through Google Services, Google Cloud, and Other Bets segments. The Google Services segment provides products and services, including ads, Android, Chrome, devices, Gmail, Google Drive, Google Maps, Google Photos, Google Play, Search, and YouTube. It is also involved in the sale of apps and in-app purchases and digital content in the Google Play and YouTube; and devices, as well as in the provision of YouTube consumer subscription services. The Google Cloud segment offers A
+    ```
+    
+    ```
+    from datetime import datetime
+    import pytz
+    import yfinance as yf
+    
+    def get_current_time(timezone: str = 'Asia/Seoul'):
+        tz = pytz.timezone(timezone) # 타임존 설정
+        now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        now_timezone = f'{now} {timezone}'
+        print(now_timezone)
+        return now_timezone
+    
+    def get_yf_stock_info(ticker: str):
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        print(info)
+        return str(info)
+    
+    def get_yf_stock_history(ticker: str, period: str):
+        stock = yf.Ticker(ticker)
+        history = stock.history(period=period)
+        history_md = history.to_markdown() # 데이터프레임을 마크다운 형식으로 변환
+        print(history_md)
+        return history_md
+    
+    def get_yf_stock_recommendations(ticker: str):
+        stock = yf.Ticker(ticker)
+        recommendations = stock.recommendations
+        recommendations_md = recommendations.to_markdown() # 데이터프레임을 마크다운 형식으로 변환
+        print(recommendations_md)
+        return recommendations_md
+    
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_time",
+                "description": "해당 타임존의 날짜와 시간을 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'timezone': {
+                            'type': 'string',
+                            'description': '현재 날짜와 시간을 반환할 타임존을 입력하세요. (예: Asia/Seoul)',
+                        },
+                    },
+                    "required": ['timezone'],
+                },        
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_yf_stock_info",
+                "description": "해당 종목의 Yahoo Finance 정보를 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'ticker': {
+                            'type': 'string',
+                            'description': 'Yahoo Finance 정보를 반환할 종목의 티커를 입력하세요. (예: AAPL)',
+                        },
+                    },
+                    "required": ['ticker'],
+                },        
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_yf_stock_history",
+                "description": "해당 종목의 Yahoo Finance 주가 정보를 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'ticker': {
+                            'type': 'string',
+                            'description': 'Yahoo Finance 주가 정보를 반환할 종목의 티커를 입력하세요. (예: AAPL)',
+                        },
+                        'period': {
+                            'type': 'string',
+                            'description': '주가 정보를 조회할 기간을 입력하세요. (예: 1d, 5d, 1mo, 1y, 5y)',
+                        },
+                    },
+                    "required": ['ticker', 'period'],
+                },        
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_yf_stock_recommendations",
+                "description": "해당 종목의 Yahoo Finance 추천 정보를 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'ticker': {
+                            'type': 'string',
+                            'description': 'Yahoo Finance 추천 정보를 반환할 종목의 티커를 입력하세요. (예: AAPL)',
+                        },
+                    },
+                    "required": ['ticker'],
+                },        
+            }
+        },
+    ]
+    
+    if __name__ == '__main__':
+        # get_current_time('America/New_York')
+        # info = get_yf_stock_info('AAPL')  
+    
+        get_yf_stock_history('AAPL', '5d')
+        print('----')
+        get_yf_stock_recommendations('AAPL')
+      
+    ```
+    
+    ```python
+    // 스트림릿 실행
+    from gpt_functions import get_current_time, tools, get_yf_stock_info
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    import streamlit as st
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")  # 환경 변수에서 API 키 가져오기
+    
+    client = OpenAI(api_key=api_key)  # 오픈AI 클라이언트의 인스턴스 생성
+    
+    def get_ai_response(messages, tools=None):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델 지정
+            messages=messages,  # 대화 기록을 입력으로 전달
+            tools=tools,  # 사용 가능한 도구 목록 전달
+        )
+        return response  # 생성된 응답 내용 반환
+    
+    st.title("💬 Chatbot")   
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+        ] 
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant" or msg["role"] == "user": # assistant 혹은 user 메시지인 경우만
+            st.chat_message(msg["role"]).write(msg["content"])
+    
+    if user_input := st.chat_input():    # 사용자 입력 받기
+        st.session_state.messages.append({"role": "user", "content": user_input})  # 사용자 메시지를 대화 기록에 추가
+        st.chat_message("user").write(user_input)  # 사용자 메시지를 브라우저에서도 출력
+        
+        ai_response = get_ai_response(st.session_state.messages, tools=tools)
+        ai_message = ai_response.choices[0].message
+        print(ai_message)  # gpt에서 반환되는 값을 파악하기 위해 임시로 추가
+    
+        tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                arguments = json.loads(tool_call.function.arguments) # 문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  # 만약 tool_name이 "get_current_time"이라면
+                    st.session_state.messages.append({
+                        "role": "function",  # role을 "function"으로 설정
+                        "tool_call_id": tool_call_id,
+                        "name": tool_name,
+                        "content": get_current_time(timezone=arguments['timezone']),  # 타임존 추가
+                    })
+                elif tool_name == "get_yf_stock_info":
+                    st.session_state.messages.append({
+                        "role": "function",
+                        "tool_call_id": tool_call_id,
+                        "name": tool_name,
+                        "content": get_yf_stock_info(ticker=arguments['ticker']),
+                    })
+    
+            st.session_state.messages.append({"role": "system", "content": "이제 주어진 결과를 바탕으로 답변할 차례다."}) 
+            ai_response = get_ai_response(st.session_state.messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": ai_message.content
+        })  # AI 응답을 대화 기록에 추가합니다.
+    
+        print("AI\t: " + ai_message.content)  # AI 응답 출력
+        st.chat_message("assistant").write(ai_message.content)  # 브라우저에 메시지 출력
+    ```
+    <img width="827" height="771" alt="스크린샷 2025-11-16 오후 5 22 23" src="https://github.com/user-attachments/assets/30045457-8cc2-4987-8144-d2488d7ac5ac" />
+
+- [실습] 코드 리팩토링하기
+    
+    ```python
+    from gpt_functions import get_current_time, tools, get_yf_stock_info
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    import streamlit as st
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")  # 환경 변수에서 API 키 가져오기
+    
+    client = OpenAI(api_key=api_key)  # 오픈AI 클라이언트의 인스턴스 생성
+    
+    def get_ai_response(messages, tools=None):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델 지정
+            messages=messages,  # 대화 기록을 입력으로 전달
+            tools=tools,  # 사용 가능한 도구 목록 전달
+        )
+        return response  # 생성된 응답 내용 반환
+    
+    st.title("💬 Chatbot")   
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+        ] 
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant" or msg["role"] == "user": # assistant 혹은 user 메시지인 경우만
+            st.chat_message(msg["role"]).write(msg["content"])
+    
+    if user_input := st.chat_input():    # 사용자 입력 받기
+        st.session_state.messages.append({"role": "user", "content": user_input})  # 사용자 메시지를 대화 기록에 추가
+        st.chat_message("user").write(user_input)  #사용자 메시지를 브라우저에서도 출력
+        
+        ai_response = get_ai_response(st.session_state.messages, tools=tools)
+        ai_message = ai_response.choices[0].message
+        print(ai_message)  # gpt에서 반환되는 값을 파악하기 위해 임시로 추가
+    
+        tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                arguments = json.loads(tool_call.function.arguments) # 문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  
+                    func_result = get_current_time(timezone=arguments['timezone'])
+                elif tool_name == "get_yf_stock_info":
+                    func_result = get_yf_stock_info(ticker=arguments['ticker'])
+           
+                st.session_state.messages.append({
+                    "role": "function",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": func_result,
+                })
+    
+            st.session_state.messages.append({"role": "system", "content": "이제 주어진 결과를 바탕으로 답변할 차례다."}) 
+            ai_response = get_ai_response(st.session_state.messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": ai_message.content
+        })  # AI 응답을 대화 기록에 추가합니다.
+    
+        print("AI\t: " + ai_message.content)  # AI 응답 출력
+        st.chat_message("assistant").write(ai_message.content)  # 브라우저에 메시지 출력
+    ```
+    
+- [실습] 종목 최근 주가 정보와 추천 정보 가져오기
+    
+    ```
+    from datetime import datetime
+    import pytz
+    import yfinance as yf
+    
+    def get_current_time(timezone: str = 'Asia/Seoul'):
+        tz = pytz.timezone(timezone) # 타임존 설정
+        now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        now_timezone = f'{now} {timezone}'
+        print(now_timezone)
+        return now_timezone
+    
+    def get_yf_stock_info(ticker: str):
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        print(info)
+        return str(info)
+    
+    def get_yf_stock_history(ticker: str, period: str):
+        stock = yf.Ticker(ticker)
+        history = stock.history(period=period)
+        history_md = history.to_markdown() # 데이터프레임을 마크다운 형식으로 변환
+        print(history_md)
+        return history_md
+    
+    def get_yf_stock_recommendations(ticker: str):
+        stock = yf.Ticker(ticker)
+        recommendations = stock.recommendations
+        recommendations_md = recommendations.to_markdown() # 데이터프레임을 마크다운 형식으로 변환
+        print(recommendations_md)
+        return recommendations_md
+    
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_time",
+                "description": "해당 타임존의 날짜와 시간을 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'timezone': {
+                            'type': 'string',
+                            'description': '현재 날짜와 시간을 반환할 타임존을 입력하세요. (예: Asia/Seoul)',
+                        },
+                    },
+                    "required": ['timezone'],
+                },        
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_yf_stock_info",
+                "description": "해당 종목의 Yahoo Finance 정보를 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'ticker': {
+                            'type': 'string',
+                            'description': 'Yahoo Finance 정보를 반환할 종목의 티커를 입력하세요. (예: AAPL)',
+                        },
+                    },
+                    "required": ['ticker'],
+                },        
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_yf_stock_history",
+                "description": "해당 종목의 Yahoo Finance 주가 정보를 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'ticker': {
+                            'type': 'string',
+                            'description': 'Yahoo Finance 주가 정보를 반환할 종목의 티커를 입력하세요. (예: AAPL)',
+                        },
+                        'period': {
+                            'type': 'string',
+                            'description': '주가 정보를 조회할 기간을 입력하세요. (예: 1d, 5d, 1mo, 1y, 5y)',
+                        },
+                    },
+                    "required": ['ticker', 'period'],
+                },        
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_yf_stock_recommendations",
+                "description": "해당 종목의 Yahoo Finance 추천 정보를 반환합니다.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        'ticker': {
+                            'type': 'string',
+                            'description': 'Yahoo Finance 추천 정보를 반환할 종목의 티커를 입력하세요. (예: AAPL)',
+                        },
+                    },
+                    "required": ['ticker'],
+                },        
+            }
+        },
+    ]
+    
+    if __name__ == '__main__':
+        # get_current_time('America/New_York')
+        # info = get_yf_stock_info('AAPL')  
+    
+        get_yf_stock_history('AAPL', '5d')
+        print('----')
+        get_yf_stock_recommendations('AAPL')
+      
+    ```
+    
+    | Date | Open | High | Low | Close | Volume | Dividends | Stock Splits |
+    | --- | --- | --- | --- | --- | --- | --- | --- |
+    | 2025-11-10 00:00:00-05:00 | 268.96 | 273.73 | 267.46 | 269.43 | 4.13124e+07 | 0.26 | 0 |
+    | 2025-11-11 00:00:00-05:00 | 269.81 | 275.91 | 269.8 | 275.25 | 4.62083e+07 | 0 | 0 |
+    | 2025-11-12 00:00:00-05:00 | 275 | 275.73 | 271.7 | 273.47 | 4.8398e+07 | 0 | 0 |
+    | 2025-11-13 00:00:00-05:00 | 274.11 | 276.7 | 272.09 | 272.95 | 4.96028e+07 | 0 | 0 |
+    | 2025-11-14 00:00:00-05:00 | 271.05 | 275.96 | 269.6 | 272.41 | 4.73993e+07 | 0 | 0 |
+    
+    ---
+    
+    |  | period | strongBuy | buy | hold | sell | strongSell |
+    | --- | --- | --- | --- | --- | --- | --- |
+    | 0 | 0m | 5 | 24 | 15 | 1 | 3 |
+    | 1 | -1m | 5 | 24 | 15 | 1 | 3 |
+    | 2 | -2m | 5 | 23 | 15 | 1 | 3 |
+    | 3 | -3m | 5 | 22 | 15 | 1 | 1 |
+    
+    ```python
+    from gpt_functions import get_current_time, tools, get_yf_stock_info, get_yf_stock_history, get_yf_stock_recommendations
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    import streamlit as st
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")  
+    
+    client = OpenAI(api_key=api_key) 
+    
+    def get_ai_response(messages, tools=None):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델 지정
+            messages=messages,  # 대화 기록을 입력으로 전달
+            tools=tools,  # 사용 가능한 도구 목록 전달
+        )
+        return response  # 생성된 응답 내용 반환
+    
+    st.title("💬 Chatbot")   
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+        ] 
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant" or msg["role"] == "user": # assistant 혹은 user 메시지인 경우만
+            st.chat_message(msg["role"]).write(msg["content"])
+    
+    if user_input := st.chat_input():    # 사용자 입력 받기
+        st.session_state.messages.append({"role": "user", "content": user_input})  # 사용자 메시지를 대화 기록에 추가
+        st.chat_message("user").write(user_input)  # 사용자 메시지를 브라우저에서도 출력
+        
+        ai_response = get_ai_response(st.session_state.messages, tools=tools)
+        ai_message = ai_response.choices[0].message
+        print(ai_message)  # gpt에서 반환되는 값을 파악하기 위해 임시로 추가
+    
+        tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                arguments = json.loads(tool_call.function.arguments) # 문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  
+                    func_result = get_current_time(timezone=arguments['timezone'])
+                elif tool_name == "get_yf_stock_info":
+                    func_result = get_yf_stock_info(ticker=arguments['ticker'])
+                elif tool_name == "get_yf_stock_history":  # get_yf_stock_history 함수 호출
+                    func_result = get_yf_stock_history(
+                        ticker=arguments['ticker'], 
+                        period=arguments['period']
+                    )
+                elif tool_name == "get_yf_stock_recommendations":  # get_yf_stock_recommendations 함수 호출
+                    func_result = get_yf_stock_recommendations(
+                        ticker=arguments['ticker']
+                    )
+    
+                st.session_state.messages.append({
+                    "role": "function",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": func_result,
+                })
+    
+            st.session_state.messages.append({"role": "system", "content": "이제 주어진 결과를 바탕으로 답변할 차례다."}) 
+            ai_response = get_ai_response(st.session_state.messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": ai_message.content
+        })  #AI 응답을 대화 기록에 추가합니다.
+    
+        print("AI\t: " + ai_message.content)  # AI 응답 출력
+        st.chat_message("assistant").write(ai_message.content)  # 브라우저에 메시지 출력
+    ```
+    
+  <img width="760" height="648" alt="스크린샷 2025-11-16 오후 5 35 22" src="https://github.com/user-attachments/assets/bf4a3ff5-1973-47f7-adc5-269baf4fcf34" />
+
+    
+
 07-3 스트림 출력하기
+
+- [실습] 터미널 창에서 스트림 방식으로 출력하기
+    
+    ```python
+    from gpt_functions import get_current_time, tools, get_yf_stock_info, get_yf_stock_history, get_yf_stock_recommendations
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    import streamlit as st
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")  # 환경 변수에서 API 키 가져오기
+    
+    client = OpenAI(api_key=api_key)  # 오픈AI 클라이언트의 인스턴스 생성
+    
+    def get_ai_response(messages, tools=None, stream=True):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델을 지정합니다.
+            stream=stream, # (1) 스트리밍 출력을 위해 설정
+            messages=messages,  # 대화 기록을 입력으로 전달합니다.
+            tools=tools,  # 사용 가능한 도구 목록을 전달합니다.
+        )
+    
+        if stream: 
+            for chunk in response:
+                yield chunk  # 생성된 응답의 내용을 yield로 순차적으로 반환합니다.
+        else:
+            return response  # 생성된 응답의 내용을 반환합니다.
+    
+    st.title("💬 Chatbot")   
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+        ] 
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant" or msg["role"] == "user": # assistant 혹은 user 메시지인 경우만
+            st.chat_message(msg["role"]).write(msg["content"])
+    
+    if user_input := st.chat_input():    # 사용자 입력 받기
+        st.session_state.messages.append({"role": "user", "content": user_input})  # 사용자 메시지를 대화 기록에 추가
+        st.chat_message("user").write(user_input)  # 사용자 메시지를 브라우저에서도 출력
+        
+        ai_response = get_ai_response(st.session_state.messages, tools=tools)
+        # print(ai_message) 
+    
+        content = ''
+        for chunk in ai_response:
+            content_chunk = chunk.choices[0].delta.content # 청크 속 content 추출
+            if content_chunk: # 만약 content_chunk가 있다면, 
+                print(content_chunk, end="")	 # 터미널에 줄바꿈 없이 이어서 출력
+                content += content_chunk # content에 덧붙이기
+            
+        print('\n===========')
+        print(content)
+    
+        ai_message = ai_response.choices[0].message
+        tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                arguments = json.loads(tool_call.function.arguments) # 문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  
+                    func_result = get_current_time(timezone=arguments['timezone'])
+                elif tool_name == "get_yf_stock_info":
+                    func_result = get_yf_stock_info(ticker=arguments['ticker'])
+                elif tool_name == "get_yf_stock_history":  # get_yf_stock_history 함수 호출
+                    func_result = get_yf_stock_history(
+                        ticker=arguments['ticker'], 
+                        period=arguments['period']
+                    )
+                elif tool_name == "get_yf_stock_recommendations":  # get_yf_stock_recommendations 함수 호출
+                    func_result = get_yf_stock_recommendations(
+                        ticker=arguments['ticker']
+                    )
+    
+                st.session_state.messages.append({
+                    "role": "function",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": func_result,
+                })
+    
+            st.session_state.messages.append({"role": "system", "content": "이제 주어진 결과를 바탕으로 답변할 차례다."}) 
+            ai_response = get_ai_response(st.session_state.messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": ai_message.content
+        })  # AI 응답을 대화 기록에 추가합니다.
+    
+        print("AI\t: " + ai_message.content)  # AI 응답 출력
+        st.chat_message("assistant").write(ai_message.content)  # 브라우저에 메시지 출력
+    ```
+    
+- [실습] 스트림릿에서 스트림 방식으로 출력하기
+    
+    ```
+    from gpt_functions import get_current_time, tools, get_yf_stock_info, get_yf_stock_history, get_yf_stock_recommendations
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    import streamlit as st
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")  # 환경 변수에서 API 키 가져오기
+    
+    client = OpenAI(api_key=api_key)  # 오픈AI 클라이언트의 인스턴스 생성
+    
+    def get_ai_response(messages, tools=None, stream=True):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델을 지정합니다.
+            stream=stream, # (1) 스트리밍 출력을 위해 설정
+            messages=messages,  # 대화 기록을 입력으로 전달합니다.
+            tools=tools,  # 사용 가능한 도구 목록을 전달합니다.
+        )
+    
+        if stream: 
+            for chunk in response:
+                yield chunk  # 생성된 응답의 내용을 yield로 순차적으로 반환합니다.
+        else:
+            return response  # 생성된 응답의 내용을 반환합니다.
+    
+    st.title("💬 Chatbot")   
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+        ] 
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant" or msg["role"] == "user": # assistant 혹은 user 메시지인 경우만
+            st.chat_message(msg["role"]).write(msg["content"])
+    
+    if user_input := st.chat_input():    # 사용자 입력 받기
+        st.session_state.messages.append({"role": "user", "content": user_input})  # 사용자 메시지를 대화 기록에 추가
+        st.chat_message("user").write(user_input)  # 사용자 메시지를 브라우저에서도 출력
+        
+        ai_response = get_ai_response(st.session_state.messages, tools=tools)
+        # print(ai_message) 
+    
+        content = ''
+        tool_calls = None # # tool_calls 초기화
+        
+        with st.chat_message("assistant").empty(): # 스트림릿 챗 메시지 초기화
+            for chunk in ai_response:
+                content_chunk = chunk.choices[0].delta.content # 청크 속 content 추출
+                if content_chunk: # 만약 content_chunk가 있다면, 
+                    print(content_chunk, end="")	 # 터미널에 줄바꿈 없이 이어서 출력
+                    content += content_chunk # content에 덧붙이기
+                    st.markdown(content) # 스트림릿 챗 메시지에 마크다운으로 출력
+            
+        print('\n===========')
+        print(content)
+    
+        # ai_message = ai_response.choices[0].message
+        # tool_calls = ai_message.tool_calls  # AI 응답에 포함된 tool_calls를 가져옵니다.
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls:
+                tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                arguments = json.loads(tool_call.function.arguments) # 문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  
+                    func_result = get_current_time(timezone=arguments['timezone'])
+                elif tool_name == "get_yf_stock_info":
+                    func_result = get_yf_stock_info(ticker=arguments['ticker'])
+                elif tool_name == "get_yf_stock_history":  # get_yf_stock_history 함수 호출
+                    func_result = get_yf_stock_history(
+                        ticker=arguments['ticker'], 
+                        period=arguments['period']
+                    )
+                elif tool_name == "get_yf_stock_recommendations":  # get_yf_stock_recommendations 함수 호출
+                    func_result = get_yf_stock_recommendations(
+                        ticker=arguments['ticker']
+                    )
+    
+                st.session_state.messages.append({
+                    "role": "function",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": func_result,
+                })
+    
+            st.session_state.messages.append({"role": "system", "content": "이제 주어진 결과를 바탕으로 답변할 차례다."}) 
+            ai_response = get_ai_response(st.session_state.messages, tools=tools) # 다시 GPT 응답 받기
+            ai_message = ai_response.choices[0].message
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": content # 원래는 ai_message.content 였음
+        })  # ③ AI 응답을 대화 기록에 추가합니다.
+    
+        print("AI\t: " + content)  # AI 응답 출력
+        # st.chat_message("assistant").write(content)  # 위에서 스트림 방식 출력하므로 불필요
+    ```
+    <img width="545" height="842" alt="스크린샷 2025-11-16 오후 5 50 38" src="https://github.com/user-attachments/assets/eefa43dd-48d4-4a6c-b09c-49f612372dcd" />
+
+- [실습] 스트림 방식에서 펑션 콜링 사용하기
+    
+    ```python
+    from gpt_functions import get_current_time, tools, get_yf_stock_info, get_yf_stock_history, get_yf_stock_recommendations
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    import os
+    import json
+    import streamlit as st
+    from collections import defaultdict
+    
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")
+    
+    client = OpenAI(api_key=api_key)  
+    
+    def tool_list_to_tool_obj(tools):
+        # 기본 값을 가진 딕셔너리 초기화
+        tool_calls_dict = defaultdict(lambda: {"id": None, "function": {"arguments": "", "name": None}, "type": None})
+    
+        # 도구(함수) 호출을 반복하여 처리
+        for tool_call in tools:
+            # id가 None이 아닌 경우 설정
+            if tool_call.id is not None:
+                tool_calls_dict[tool_call.index]["id"] = tool_call.id
+    
+            # 함수 이름이 None이 아닌 경우 설정
+            if tool_call.function.name is not None:
+                tool_calls_dict[tool_call.index]["function"]["name"] = tool_call.function.name
+    
+            # 인수 추가
+            tool_calls_dict[tool_call.index]["function"]["arguments"] += tool_call.function.arguments
+    
+            # 타입이 None이 아닌 경우 설정
+            if tool_call.type is not None:
+                tool_calls_dict[tool_call.index]["type"] = tool_call.type
+    
+        # 딕셔너리를 리스트로 변환
+        tool_calls_list = list(tool_calls_dict.values())
+    
+        return {"tool_calls": tool_calls_list}  
+    
+    def get_ai_response(messages, tools=None, stream=True):
+        response = client.chat.completions.create(
+            model="gpt-4o",  # 응답 생성에 사용할 모델을 지정합니다.
+            stream=stream, # (1) 스트리밍 출력을 위해 설정
+            messages=messages,  # 대화 기록을 입력으로 전달합니다.
+            tools=tools,  # 사용 가능한 도구 목록을 전달합니다.
+        )
+    
+        if stream: 
+            for chunk in response:
+                yield chunk  # 생성된 응답의 내용을 yield로 순차적으로 반환합니다.
+        else:
+            return response  # 생성된 응답의 내용을 반환합니다.
+    
+    st.title("💬 Chatbot")   
+    
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "system", "content": "너는 사용자를 도와주는 상담사야."},  # 초기 시스템 메시지
+        ] 
+    
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant" or msg["role"] == "user": # assistant 혹은 user 메시지인 경우만
+            st.chat_message(msg["role"]).write(msg["content"])
+    
+    if user_input := st.chat_input():    # 사용자 입력 받기
+        st.session_state.messages.append({"role": "user", "content": user_input})  # 사용자 메시지를 대화 기록에 추가
+        st.chat_message("user").write(user_input)  # 사용자 메시지를 브라우저에서도 출력
+        
+        ai_response = get_ai_response(st.session_state.messages, tools=tools)
+        # print(ai_message) 
+    
+        content = ''
+        tool_calls = None # # tool_calls 초기화
+        tool_calls_chunk = []   # tool_calls_chunk 초기화
+        
+        with st.chat_message("assistant").empty(): # 스트림릿 챗 메시지 초기화
+            for chunk in ai_response:
+                content_chunk = chunk.choices[0].delta.content # 청크 속 content 추출
+                if content_chunk: # 만약 content_chunk가 있다면, 
+                    print(content_chunk, end="")	 # 터미널에 줄바꿈 없이 이어서 출력
+                    content += content_chunk # content에 덧붙이기
+                    st.markdown(content) # 스트림릿 챗 메시지에 마크다운으로 출력
+                
+                # print(chunk) # 임시로 청크 출력
+                if chunk.choices[0].delta.tool_calls:	# tool_calls가 있는 경우
+                    tool_calls_chunk += chunk.choices[0].delta.tool_calls # tool_calls_chunk에 추가
+    
+        tool_obj = tool_list_to_tool_obj(tool_calls_chunk)
+        tool_calls = tool_obj["tool_calls"]   
+    
+        if len(tool_calls) > 0: # 만약 tool_calls가 존재하면, st.write로 tool_call 내용 출력
+            print(tool_calls)
+            # tool_calls에서 function 정보만 모아서 출력
+            tool_call_msg = [tool_call["function"] for tool_call in tool_calls]
+            st.write(tool_call_msg) 
+    
+        print('\n===========')
+        print(content)
+    
+        # print('\n=========== tool_calls_chunk')  # tool_calls_chunk 확인하기 위한 코드
+        # for tool_call_chunk in tool_calls_chunk:
+        #     print(tool_call_chunk)
+    
+        # tool_obj = tool_list_to_tool_obj(tool_calls_chunk) # 위로 이동
+        # tool_calls = tool_obj["tool_calls"] # 위로 이동동
+        print(tool_calls)
+    
+        if tool_calls:  # tool_calls가 있는 경우
+            for tool_call in tool_calls:
+                # tool_name = tool_call.function.name # 실행해야한다고 판단한 함수명 받기
+                # tool_call_id = tool_call.id         # tool_call 아이디 받기    
+                # arguments = json.loads(tool_call.function.arguments) # 문자열을 딕셔너리로 변환    
+    
+                # 딕셔너리 형태에서 받기
+                tool_name = tool_call["function"]["name"]  # 실행해야한다고 판단한 함수명 받기
+                tool_call_id = tool_call["id"]         # 함수 아이디 받기
+                arguments = json.loads(tool_call["function"]["arguments"]) # 문자열을 딕셔너리로 변환    
+                
+                if tool_name == "get_current_time":  
+                    func_result = get_current_time(timezone=arguments['timezone'])
+                elif tool_name == "get_yf_stock_info":
+                    func_result = get_yf_stock_info(ticker=arguments['ticker'])
+                elif tool_name == "get_yf_stock_history":  # get_yf_stock_history 함수 호출
+                    func_result = get_yf_stock_history(
+                        ticker=arguments['ticker'], 
+                        period=arguments['period']
+                    )
+                elif tool_name == "get_yf_stock_recommendations":  # get_yf_stock_recommendations 함수 호출
+                    func_result = get_yf_stock_recommendations(
+                        ticker=arguments['ticker']
+                    )
+    
+                st.session_state.messages.append({
+                    "role": "function",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "content": func_result,
+                })
+    
+            st.session_state.messages.append({
+                "role": "system", 
+                "content": "이제 주어진 결과를 바탕으로 답변할 차례다."
+            }) 
+            ai_response = get_ai_response(st.session_state.messages, tools=tools) # 다시 GPT 응답 받기
+            # ai_message = ai_response.choices[0].message
+            content = ""
+            with st.chat_message("assistant").empty():
+                for chunk in ai_response:
+                    content_chunk = chunk.choices[0].delta.content
+                    if content_chunk:
+                        print(content_chunk, end='')
+                        content += content_chunk
+                        st.markdown(content) # 스트림릿 챗메시지에 markdown으로 출력
+    
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": content # 원래는 ai_message.content 였음
+        })  # AI 응답을 대화 기록에 추가합니다.
+    
+        print("AI\t: " + content)  # AI 응답 출력
+        # st.chat_message("assistant").write(content)  # 위에서 스트림 방식 출력하므로 불필요
+    ```
+    <img width="775" height="777" alt="스크린샷 2025-11-16 오후 5 57 37" src="https://github.com/user-attachments/assets/0cd430a5-b805-493c-8865-99aedc433e55" />
+
+    
+    
